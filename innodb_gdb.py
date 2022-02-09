@@ -534,8 +534,22 @@ def print_buffer_pool():
         print("***Buffer pool {} ***".format(i))
         print_buffer_pool_instance(buf_pool_ptr[i])
 
+def rec_offs_any_extern(offsets):
+    return offsets[REC_OFFS_HEADER_SIZE] & REC_OFFS_EXTERNAL
+
+def rec_offs_nth_extern(offsets,n):
+    return offsets[REC_OFFS_HEADER_SIZE + 1 + n] & REC_OFFS_EXTERNAL
+
+def rec_offs_n_extern(offsets):
+        n = 0
+        if rec_offs_any_extern(offsets):
+            for i in range(rec_offs_n_fields(offsets), 0, -1):
+                if rec_offs_nth_extern(offsets, i):
+                    n += 1;
+        return n
+
 def buf_pool_get(space_id, page_no):
-    page_id = fold(space_id, page_no)
+    page_id = fold(space_id, page_no >> 6)
     f = gdb.selected_frame()
     buf_pool_ptr = f.read_var("buf_pool_ptr")
     srv_buf_pool_instances = f.read_var("srv_buf_pool_instances")
