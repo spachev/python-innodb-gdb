@@ -516,8 +516,23 @@ def page_find_rec_with_heap_no(page, heap_no):
                 return None
             rec = page + rec_get_next_offs(rec, False);
 
+def print_buffer_pool_instance(buf_pool):
+    h = buf_pool["page_hash"]
+    n_cells = h["n_cells"]
+    arr = h["array"]
+    for i in range(0, n_cells):
+        data = arr[i]["node"].cast(gdb.lookup_type("buf_page_t").pointer())
+        while data:
+            print(data["id"])
+            data = data["hash"]
 
-
+def print_buffer_pool():
+    f = gdb.selected_frame()
+    buf_pool_ptr = f.read_var("buf_pool_ptr")
+    srv_buf_pool_instances = f.read_var("srv_buf_pool_instances")
+    for i in range(0, srv_buf_pool_instances):
+        print("***Buffer pool {} ***".format(i))
+        print_buffer_pool_instance(buf_pool_ptr[i])
 
 def buf_pool_get(space_id, page_no):
     page_id = fold(space_id, page_no)
@@ -577,9 +592,11 @@ def fold(space_id, page_no):
 def print_rec_list(rec_list):
     for r in rec_list:
         tmp = r.copy()
-        del tmp["rec_info"]
+        if "rec_info" in tmp:
+            del tmp["rec_info"]
         print(tmp)
-        print(r["rec_info"])
+        if "rec_info" in r:
+            print(r["rec_info"])
 
 def print_trx_locks(trx):
     trx_locks = trx["lock"]["trx_locks"]
