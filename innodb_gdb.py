@@ -246,23 +246,11 @@ def rec_get_nth_field_offs(offsets, n):
 
 def rec_comp_to_str(rec, offsets):
     res = ""
-
     for i in range(0,rec_offs_n_fields(offsets)):
         data,len = rec_get_nth_field(rec, offsets, i)
         res += "{}: ".format(i)
         if len != UNIV_SQL_NULL:
-            if (len <= 30):
-                res += ut_buf_to_str(data, len)
-            elif rec_offs_nth_extern(offsets, i):
-                res += ut_but_to_str(data, 30)
-                res += "(total {} bytes, external)".format(len)
-                res += ut_buf_to_str(data + len
-                                            - BTR_EXTERN_FIELD_REF_SIZE,
-                                            BTR_EXTERN_FIELD_REF_SIZE)
-            else:
-                 res += ut_buf_to_str(data, 30)
-                 res += '(total {} bytes)'.format(len)
-
+            res += ut_buf_to_str(data, len)
         else:
             res += " SQL NULL"
         res += ";\n"
@@ -350,29 +338,27 @@ def rec_init_offsets_comp_ordinary(rec, temp, index, offsets):
                 nulls -= 1
                 null_mask = 1
 
-
-
-            if (nulls.dereference() & null_mask):
+            if (int(nulls[0]) & null_mask):
                 null_mask <<= 1
                 len = offs | REC_OFFS_SQL_NULL;
                 goto .resolved
             null_mask <<= 1;
 
         if (not field['fixed_len'] or (temp and not dict_col_get_fixed_size(col, temp))):
-            len = lens.dereference()
+            len = int(lens[0])
             lens -= 1
             if (DATA_BIG_COL(col)):
                 if (len & 0x80):
                     len <<= 8;
-                    len |= lens.dereference()
+                    len |= int(lens[0])
                     lens -= 1
                     offs += len & 0x3fff;
-                if (len & 0x4000):
-                    any_ext = REC_OFFS_EXTERNAL
-                    len = offs | REC_OFFS_EXTERNAL
-                else:
-                    len = offs
-                goto .resolved
+                    if (len & 0x4000):
+                        any_ext = REC_OFFS_EXTERNAL
+                        len = offs | REC_OFFS_EXTERNAL
+                    else:
+                        len = offs
+                    goto .resolved
 
             offs += len
             len = offs
@@ -501,8 +487,7 @@ def page_find_rec_with_heap_no(page, heap_no):
              if rec_heap_no == heap_no:
                 return rec
              elif rec_heap_no == PAGE_HEAP_NO_SUPREMUM :
-
-                                return None
+                return None
 
              rec = page + rec_get_next_offs(rec, True);
     else:
