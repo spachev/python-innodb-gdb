@@ -142,7 +142,7 @@ REC_N_OWNED_SHIFT = 0
 #
 REC_OLD_INFO_BITS = 6       # This is single byte bit-field
 REC_NEW_INFO_BITS = 5       # This is single byte bit-field
-REC_INFO_BITS_MASK = 0xF
+REC_INFO_BITS_MASK = 0xF0
 REC_INFO_BITS_SHIFT = 0
 DATA_BLOB = 5
 DATA_GEOMETRY = 14
