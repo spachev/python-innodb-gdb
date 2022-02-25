@@ -4,8 +4,44 @@ import gdb
 import string
 from goto import with_goto
 
+def dict_globalize(d):
+    for k in d:
+        globals()[k] = d[k]
+
+def dict_flip(d):
+    return { d[k]:k for k in d}
+
+
 UT_HASH_RANDOM_MASK2=0x62946a4f
-LOCK_REC = 0x20
+
+lock_mode_lookup = {
+    "LOCK_IS" : 0, # intention shared
+    "LOCK_IX" : 1, #intention exclusive
+    "LOCK_S" : 2, # shared
+    "LOCK_X" : 3, # exclusive
+    "LOCK_AUTO_INC": 4,  # locks the auto-inc counter of a table
+    "LOCK_NONE" : 5,      # this is used elsewhere to note consistent read */
+}
+
+
+dict_globalize(lock_mode_lookup)
+lock_mode_rev_lookup = dict_flip(lock_mode_lookup)
+
+lock_flags_lookup = {
+    "LOCK_TABLE" : 0x10,
+    "LOCK_REC" : 0x20,
+    "LOCK_WAIT": 0x100,
+    "LOCK_GAP": 0x200,
+    "LOCK_REC_NOT_GAP": 0x400,
+    "LOCK_INSERT_INTENTION": 0x800,
+    "LOCK_PREDICATE": 0x2000,
+    "LOCK_PRDR_PAGE": 0x4000,
+}
+
+dict_globalize(lock_flags_lookup)
+
+LOCK_MODE_MASK = 0xF
+
 UNIV_PAGE_SIZE = 16384
 ULINT_UNDEFINED = (1 << 65) - 1
 ULINT32_UNDEFINED = (1 << 32) - 1
@@ -597,6 +633,14 @@ def print_rec_list(rec_list):
         if "rec_info" in r:
             print(r["rec_info"])
 
+def decode_lock_type_mode(type_mode):
+    global lock_flags_lookup
+    global lock_mode_rev_lookup
+    mode = type_mode & LOCK_MODE_MASK
+    mode_str = lock_mode_rev_lookup.get(mode, "Unknown")
+    type_str = "|".join([k for k in lock_flags_lookup if type_mode & lock_flags_lookup[k]])
+    return type_str + "|" + mode_str
+
 def print_trx_locks(trx):
     trx_locks = trx["lock"]["trx_locks"]
     start = trx_locks["start"]
@@ -607,7 +651,7 @@ def print_trx_locks(trx):
         index = cur["index"]
         table_name = cur["index"]["table"]["name"] if cur["index"] else None
         index_name = cur["index"]["name"] if cur["index"] else None
-        type_mode = cur["type_mode"]
+        type_mode = int(cur["type_mode"])
         rec_lock_map_addr = cur + 1
         rec_lock_map = rec_lock_map_addr.cast(gdb.lookup_type("char").pointer())
         n_bytes = rec_lock["n_bits"]/8
@@ -631,8 +675,8 @@ def print_trx_locks(trx):
                                     rec_info['rec_info'] = rec_to_str(rec, offsets)
                                 rec_info_list.append(rec_info)
                         mask <<= 1
-        print("rec_lock={} index={} table={} type_mode={} ".format(rec_lock, index_name,
-            table_name, type_mode))
+        print("rec_lock={} index={} table={} type_mode={}({}) ".format(rec_lock, index_name,
+            table_name, type_mode, decode_lock_type_mode(type_mode)))
         print_rec_list(rec_info_list)
         cur = cur["trx_locks"]["next"]
 
