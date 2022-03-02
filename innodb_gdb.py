@@ -641,42 +641,87 @@ def decode_lock_type_mode(type_mode):
     type_str = "|".join([k for k in lock_flags_lookup if type_mode & lock_flags_lookup[k]])
     return type_str + "|" + mode_str
 
+def find_lock_owners_in_trx(trx, space_no, page_no, heap_no):
+    cur = trx["lock"]["trx_locks"]["start"]
+    res = []
+    while cur:
+        lock_info = get_lock_info(cur)
+        rec_lock = lock_info['rec_lock']
+        if rec_lock['space'] == space_no and rec_lock['page_no'] == page_no:
+            rec_info_list = lock_info['rec_info_list']
+            for r in rec_info_list:
+                if r["heap_no"] == heap_no:
+                   res.append(lock_info)
+                   break
+
+        cur = cur["trx_locks"]["next"]
+    return res
+
+def get_lock_info(lock):
+    rec_lock = lock["un_member"]["rec_lock"]
+    index = lock["index"]
+    table_name = lock["index"]["table"]["name"] if lock["index"] else None
+    index_name = lock["index"]["name"] if lock["index"] else None
+    type_mode = int(lock["type_mode"])
+    rec_lock_map_addr = lock + 1
+    rec_lock_map = rec_lock_map_addr.cast(gdb.lookup_type("char").pointer())
+    n_bytes = rec_lock["n_bits"]/8
+    block = buf_page_try_get(rec_lock["space"], rec_lock["page_no"])
+    frame = buf_block_get_frame(block) if block else None
+
+    rec_info_list = []
+    offsets = [0 for _ in range(0,REC_OFFS_NORMAL_SIZE)]
+    if type_mode & LOCK_REC:
+        for i in range(0,n_bytes):
+            mask = 0x1
+            for j in range(0,8):
+                    if rec_lock_map[i] & mask:
+                            heap_no = i*8+j
+                            rec_info = {'heap_no': heap_no}
+                            if frame:
+                                rec = page_find_rec_with_heap_no(frame, heap_no)
+                                rec_info['rec_ptr'] = rec.cast(gdb.lookup_type("char").pointer())
+                                rec_info['offsets'] = offsets = rec_get_offsets(rec, index, offsets,
+                                                                        ULINT_UNDEFINED)
+                                rec_info['rec_info'] = rec_to_str(rec, offsets)
+                            rec_info_list.append(rec_info)
+                    mask <<= 1
+    return {'index_name' : index_name, 'table_name': table_name, 'type_mode' : type_mode,
+            'rec_info_list': rec_info_list, 'rec_lock': rec_lock}
+
+def find_lock_owners(space_no, page_no, heap_no):
+    f = gdb.selected_frame()
+    trx_sys = f.read_var("trx_sys")
+    cur_trx = trx_sys["rw_trx_list"]["start"]
+    res = []
+    while cur_trx:
+        res += find_lock_owners_in_trx(cur_trx, space_no, page_no, heap_no)
+        cur_trx = cur_trx["mysql_trx_list"]["next"]
+    return res
+
+
+def print_lock_owners(space_no, page_no, heap_no):
+    owners = find_lock_owners(space_no, page_no, heap_no)
+    for lock_info in owners:
+        print("rec_lock={} index={} table={} type_mode={}({}) ".format(lock_info["rec_lock"],
+                                                                lock_info["index_name"],
+                                lock_info["table_name"],
+                                lock_info["type_mode"],
+                                decode_lock_type_mode(lock_info["type_mode"])))
+
+
 def print_trx_locks(trx):
     trx_locks = trx["lock"]["trx_locks"]
     start = trx_locks["start"]
     cur = start
 
     while cur:
-        rec_lock = cur["un_member"]["rec_lock"]
-        index = cur["index"]
-        table_name = cur["index"]["table"]["name"] if cur["index"] else None
-        index_name = cur["index"]["name"] if cur["index"] else None
-        type_mode = int(cur["type_mode"])
-        rec_lock_map_addr = cur + 1
-        rec_lock_map = rec_lock_map_addr.cast(gdb.lookup_type("char").pointer())
-        n_bytes = rec_lock["n_bits"]/8
-        block = buf_page_try_get(rec_lock["space"], rec_lock["page_no"])
-        frame = buf_block_get_frame(block) if block else None
-
-        rec_info_list = []
-        offsets = [0 for _ in range(0,REC_OFFS_NORMAL_SIZE)]
-        if type_mode & LOCK_REC:
-            for i in range(0,n_bytes):
-                mask = 0x1
-                for j in range(0,8):
-                        if rec_lock_map[i] & mask:
-                                heap_no = i*8+j
-                                rec_info = {'heap_no': heap_no}
-                                if frame:
-                                    rec = page_find_rec_with_heap_no(frame, heap_no)
-                                    rec_info['rec_ptr'] = rec.cast(gdb.lookup_type("char").pointer())
-                                    rec_info['offsets'] = offsets = rec_get_offsets(rec, index, offsets,
-                                                                          ULINT_UNDEFINED)
-                                    rec_info['rec_info'] = rec_to_str(rec, offsets)
-                                rec_info_list.append(rec_info)
-                        mask <<= 1
-        print("rec_lock={} index={} table={} type_mode={}({}) ".format(rec_lock, index_name,
-            table_name, type_mode, decode_lock_type_mode(type_mode)))
-        print_rec_list(rec_info_list)
+        lock_info = get_lock_info(cur)
+        print("rec_lock={} index={} table={} type_mode={}({}) ".format(lock_info["rec_lock"],
+                                                                       lock_info["index_name"],
+                                        lock_info["table_name"],
+                                        lock_info["type_mode"],
+                                        decode_lock_type_mode(lock_info["type_mode"])))
+        print_rec_list(lock_info['rec_info_list'])
         cur = cur["trx_locks"]["next"]
 
