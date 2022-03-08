@@ -641,24 +641,28 @@ def decode_lock_type_mode(type_mode):
     type_str = "|".join([k for k in lock_flags_lookup if type_mode & lock_flags_lookup[k]])
     return type_str + "|" + mode_str
 
+def get_thd_summary(trx):
+  thd = trx["mysql_thd"]
+  query = thd["query_string"]["string"]["str"]
+  return "OS id {:X} thread id {} query {}".format(int(thd["real_id"]), thd["thread_id"], query)
+
 def find_lock_owners_in_trx(trx, space_no, page_no, heap_no):
     cur = trx["lock"]["trx_locks"]["start"]
     res = []
     while cur:
-        lock_info = get_lock_info(cur)
-        rec_lock = lock_info['rec_lock']
-        if rec_lock['space'] == space_no and rec_lock['page_no'] == page_no:
-            rec_info_list = lock_info['rec_info_list']
-            for r in rec_info_list:
-                if r["heap_no"] == heap_no:
-                   res.append(lock_info)
-                   break
-
+        lock_info = get_lock_info(cur, space_no, page_no, heap_no)
+        if lock_info:
+          lock_info["trx"] = trx
+          res.append(lock_info)
         cur = cur["trx_locks"]["next"]
     return res
 
-def get_lock_info(lock):
+def get_lock_info(lock, space_no = None, page_no = None, heap_no_arg = None):
     rec_lock = lock["un_member"]["rec_lock"]
+    if space_no is not None and rec_lock["space"] != space_no:
+      return None
+    if page_no is not None and rec_lock["page_no"] != page_no:
+      return None
     index = lock["index"]
     table_name = lock["index"]["table"]["name"] if lock["index"] else None
     index_name = lock["index"]["name"] if lock["index"] else None
@@ -677,6 +681,8 @@ def get_lock_info(lock):
             for j in range(0,8):
                     if rec_lock_map[i] & mask:
                             heap_no = i*8+j
+                            if heap_no_arg != None and heap_no != heap_no_arg:
+                              continue
                             rec_info = {'heap_no': heap_no}
                             if frame:
                                 rec = page_find_rec_with_heap_no(frame, heap_no)
@@ -692,7 +698,7 @@ def get_lock_info(lock):
 def find_lock_owners(space_no, page_no, heap_no):
     f = gdb.selected_frame()
     trx_sys = f.read_var("trx_sys")
-    cur_trx = trx_sys["rw_trx_list"]["start"]
+    cur_trx = trx_sys["mysql_trx_list"]["start"]
     res = []
     while cur_trx:
         res += find_lock_owners_in_trx(cur_trx, space_no, page_no, heap_no)
@@ -703,8 +709,10 @@ def find_lock_owners(space_no, page_no, heap_no):
 def print_lock_owners(space_no, page_no, heap_no):
     owners = find_lock_owners(space_no, page_no, heap_no)
     for lock_info in owners:
-        print("rec_lock={} index={} table={} type_mode={}({}) ".format(lock_info["rec_lock"],
-                                                                lock_info["index_name"],
+        print("trx={} rec_lock={} index={} table={} type_mode={}({}) ".format(
+                                get_thd_summary(lock_info["trx"]),
+                                lock_info["rec_lock"],
+                                lock_info["index_name"],
                                 lock_info["table_name"],
                                 lock_info["type_mode"],
                                 decode_lock_type_mode(lock_info["type_mode"])))
