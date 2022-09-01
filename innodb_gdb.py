@@ -733,3 +733,28 @@ def print_trx_locks(trx):
         print_rec_list(lock_info['rec_info_list'])
         cur = cur["trx_locks"]["next"]
 
+def for_each_thread(cb):
+    for thd in gdb.selected_inferior().threads():
+        cb(thd)
+
+def filter_threads(cb):
+    res = []
+    for thd in gdb.selected_inferior().threads():
+        if cb(thd):
+            res.append(thd)
+    return res
+
+def find_func_in_thread(thd, cb):
+    thd.switch()
+    f = gdb.newest_frame()
+    while f:
+        func = f.function()
+        if func and cb(func):
+            return f
+        f = f.older()
+    return None
+
+def find_query_frame(thd):
+    return find_func_in_thread(thd, lambda func: func.name.startswith("mysql_parse"))
+
+
