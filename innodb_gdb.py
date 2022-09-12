@@ -745,16 +745,28 @@ def filter_threads(cb):
     return res
 
 def find_func_in_thread(thd, cb):
+    return find_frame_in_thread(thd, lambda f: f.function() and cb(f.function()))
+
+def find_frame_in_thread(thd, cb):
     thd.switch()
     f = gdb.newest_frame()
     while f:
-        func = f.function()
-        if func and cb(func):
+        if cb(f):
             return f
         f = f.older()
     return None
 
+
+def safe_get_frame_var(f, name):
+    try:
+        return f.read_var(name)
+    except:
+        return None
+
 def find_query_frame(thd):
     return find_func_in_thread(thd, lambda func: func.name.startswith("mysql_parse"))
+
+def find_frame_w_var(thd, var):
+    return find_frame_in_thread(thd, lambda f: safe_get_frame_var(f, var))
 
 
